@@ -1,6 +1,6 @@
 import { ai, storage, db } from "hatchable";
 
-export const access = "public";
+export const access = "member";
 export const methods = ["POST"];
 
 // Gemini 2.5 access can be restricted for newer API projects; use the current

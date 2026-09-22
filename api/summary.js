@@ -1,6 +1,6 @@
 import { ai, db } from "hatchable";
 
-export const access = "public";
+export const access = "member";
 export const methods = ["POST"];
 
 const SYSTEM = `You are MediKiosk's physician-documentation assistant.
