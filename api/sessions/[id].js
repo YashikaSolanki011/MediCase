@@ -1,6 +1,6 @@
 import { db } from "hatchable";
 
-export const access = "member";
+export const access = "user";
 export const methods = ["GET"];
 
 export default async function (req, res) {
@@ -8,8 +8,8 @@ export default async function (req, res) {
   if (!id) return res.status(400).json({ error: "session id is required." });
 
   const sessions = await db.query(
-    "SELECT id, patient_name, patient_age, language, chief_complaint, intake_json, status, created_at, updated_at FROM clinical_sessions WHERE id=$1",
-    [id]
+    "SELECT id, owner_user_id, patient_name, patient_age, language, chief_complaint, intake_json, status, created_at, updated_at FROM clinical_sessions WHERE id=$1 AND owner_user_id=$2",
+    [id, req.user.id]
   );
   if (!sessions.rows.length) return res.status(404).json({ error: "Session not found." });
 

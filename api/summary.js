@@ -1,6 +1,6 @@
 import { ai, db } from "hatchable";
 
-export const access = "member";
+export const access = "user";
 export const methods = ["POST"];
 
 const SYSTEM = `You are MediKiosk's physician-documentation assistant.
@@ -28,8 +28,8 @@ export default async function (req, res) {
   if (!sessionId) return res.status(400).json({ error: "sessionId is required." });
 
   const { rows } = await db.query(
-    "SELECT id, patient_name, patient_age, language, chief_complaint, intake_json FROM clinical_sessions WHERE id=$1",
-    [sessionId]
+    "SELECT id, patient_name, patient_age, language, chief_complaint, intake_json FROM clinical_sessions WHERE id=$1 AND owner_user_id=$2",
+    [sessionId, req.user.id]
   );
   if (!rows.length) return res.status(404).json({ error: "Session not found." });
 

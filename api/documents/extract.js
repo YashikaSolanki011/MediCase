@@ -1,6 +1,6 @@
 import { ai, db } from "hatchable";
 
-export const access = "member";
+export const access = "user";
 export const methods = ["POST"];
 
 export default async function (req, res) {
@@ -12,6 +12,8 @@ export default async function (req, res) {
     [documentId]
   );
   if (!rows.length) return res.status(404).json({ error: "Document not found." });
+  const owner = await db.query("SELECT id FROM clinical_sessions WHERE id=$1 AND owner_user_id=$2", [rows[0].session_id, req.user.id]);
+  if (!owner.rows.length) return res.status(404).json({ error: "Document not found." });
 
   const text = rows[0].ocr_text;
   if (!text) return res.status(400).json({ error: "No OCR text is available for this document." });

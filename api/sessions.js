@@ -1,14 +1,19 @@
 import { db } from "hatchable";
 
-export const access = "member";
+export const access = "user";
 export const methods = ["GET","POST"];
 
 export default async function (req, res) {
   if (req.method === "GET") {
+    // One-time migration bridge for records created before end-user auth existed.
+    const owned = await db.query("SELECT count(*)::int AS count FROM clinical_sessions WHERE owner_user_id=$1", [req.user.id]);
+    if ((owned.rows[0]?.count || 0) === 0) {
+      await db.query("UPDATE clinical_sessions SET owner_user_id=$1 WHERE owner_user_id IS NULL", [req.user.id]);
+    }
     const limit = Math.min(Math.max(Number(req.query?.limit || 8), 1), 50);
     const { rows } = await db.query(
-      "SELECT id, patient_name, patient_age, language, chief_complaint, status, created_at, updated_at FROM clinical_sessions ORDER BY updated_at DESC LIMIT $1",
-      [limit]
+      "SELECT id, patient_name, patient_age, language, chief_complaint, status, created_at, updated_at FROM clinical_sessions WHERE owner_user_id=$1 ORDER BY updated_at DESC LIMIT $2",
+      [req.user.id, limit]
     );
     return res.json({
       sessions: rows.map(r => ({
@@ -44,8 +49,8 @@ export default async function (req, res) {
   };
 
   const { rows } = await db.query(
-    "INSERT INTO clinical_sessions (patient_name, patient_age, language, chief_complaint, intake_json) VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at, updated_at",
-    [name || null, age, language, complaint || null, JSON.stringify(intake)]
+    "INSERT INTO clinical_sessions (owner_user_id, patient_name, patient_age, language, chief_complaint, intake_json) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at, updated_at",
+    [req.user.id, name || null, age, language, complaint || null, JSON.stringify(intake)]
   );
 
   await db.query(

@@ -1,6 +1,6 @@
 import { ai } from "hatchable";
 
-export const access = "member";
+export const access = "user";
 export const methods = ["POST"];
 
 const SYSTEM = `You are MediKiosk's clinical documentation extraction engine.

@@ -161,6 +161,16 @@ function formatDate(x){if(!x)return '—';const d=new Date(x);return isNaN(d)?St
 function esc(x){return String(x??'').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#39;'}[m]||m))}
 
 async function initApp(){
+  if (window.hatchable?.auth) {
+    const authSession = await window.hatchable.auth.getSession();
+    if (!authSession?.user) {
+      window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
+      return;
+    }
+    const user = authSession.user;
+    const badge = document.querySelector('.status');
+    if (badge) badge.textContent = '● Signed in · ' + (user.email || user.name || 'patient');
+  }
   await loadRecentSessions();
   const last=localStorage.getItem(LAST_SESSION_KEY);
   if(last) await loadSession(last,{announce:false});

@@ -1,6 +1,6 @@
 import { ai, storage, db } from "hatchable";
 
-export const access = "member";
+export const access = "user";
 export const methods = ["POST"];
 
 // Gemini 2.5 access can be restricted for newer API projects; use the current
@@ -13,6 +13,8 @@ export default async function (req, res) {
 
   if (!file) return res.status(400).json({ error: "Upload a document or image in multipart/form-data." });
   if (!sessionId) return res.status(400).json({ error: "sessionId is required." });
+  const owner = await db.query("SELECT id FROM clinical_sessions WHERE id=$1 AND owner_user_id=$2", [sessionId, req.user.id]);
+  if (!owner.rows.length) return res.status(404).json({ error: "Patient session not found." });
   if (!["image/jpeg","image/png","image/webp","application/pdf"].includes(file.contentType)) {
     return res.status(400).json({ error: "Supported types: JPEG, PNG, WEBP, PDF." });
   }
