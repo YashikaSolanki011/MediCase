@@ -1,0 +1,1 @@
+const state={answers:{}};function setAnswer(k,v){state.answers[k]=v}function safe(x){return String(x).replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]))}window.MediKiosk={state,setAnswer,safe};
