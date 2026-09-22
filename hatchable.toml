@@ -1,6 +1,3 @@
-[auth]
-enabled = true
-
 [ai]
 required = true
 pin = "google"
