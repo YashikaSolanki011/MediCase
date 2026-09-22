@@ -3,7 +3,9 @@ import { ai, storage, db } from "hatchable";
 export const access = "public";
 export const methods = ["POST"];
 
-const VISION_MODEL = "gemini-2.5-flash";
+// Gemini 2.5 access can be restricted for newer API projects; use the current
+// cost-efficient multimodal model for OCR/document understanding.
+const VISION_MODEL = "gemini-3.1-flash-lite";
 
 export default async function (req, res) {
   const file = req.files?.[0];
@@ -45,8 +47,15 @@ Return plain text only. Mark an unreadable region as [UNCLEAR] rather than inven
     });
 
     if (!r.ok) {
-      console.error("Gemini OCR failed", { status: r.status, error: r.error });
-      return res.status(502).json({ error: "OCR provider failed. The uploaded file was retained for retry." });
+      console.error("Gemini OCR failed", { status: r.status, error: JSON.stringify(r.error || null) });
+      const providerDetail = typeof r.error === "string"
+        ? r.error
+        : (r.error?.message || r.error?.error?.message || null);
+      return res.status(502).json({
+        error: "OCR provider failed. The uploaded file was retained for retry.",
+        providerStatus: r.status,
+        providerDetail: providerDetail ? String(providerDetail).slice(0, 300) : null
+      });
     }
 
     const data = await r.json();
