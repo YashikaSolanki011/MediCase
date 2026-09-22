@@ -1,9 +1,29 @@
 import { db } from "hatchable";
 
 export const access = "public";
-export const methods = ["POST"];
+export const methods = ["GET","POST"];
 
 export default async function (req, res) {
+  if (req.method === "GET") {
+    const limit = Math.min(Math.max(Number(req.query?.limit || 8), 1), 50);
+    const { rows } = await db.query(
+      "SELECT id, patient_name, patient_age, language, chief_complaint, status, created_at, updated_at FROM clinical_sessions ORDER BY updated_at DESC LIMIT $1",
+      [limit]
+    );
+    return res.json({
+      sessions: rows.map(r => ({
+        id: r.id,
+        patientName: r.patient_name,
+        patientAge: r.patient_age,
+        language: r.language,
+        chiefComplaint: r.chief_complaint,
+        status: r.status,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+      }))
+    });
+  }
+
   const body = req.body || {};
   const name = String(body.patientName || "").trim().slice(0, 200);
   const age = Number.isFinite(Number(body.patientAge)) ? Number(body.patientAge) : null;
@@ -24,7 +44,7 @@ export default async function (req, res) {
   };
 
   const { rows } = await db.query(
-    "INSERT INTO clinical_sessions (patient_name, patient_age, language, chief_complaint, intake_json) VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at",
+    "INSERT INTO clinical_sessions (patient_name, patient_age, language, chief_complaint, intake_json) VALUES ($1,$2,$3,$4,$5) RETURNING id, created_at, updated_at",
     [name || null, age, language, complaint || null, JSON.stringify(intake)]
   );
 

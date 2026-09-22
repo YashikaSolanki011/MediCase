@@ -38,14 +38,8 @@ export default async function (req, res) {
     [sessionId]
   );
 
-  const source = JSON.stringify({
-    session: rows[0],
-    documents: docs.rows
-  });
-
-  if (source.length > 60000) {
-    return res.status(413).json({ error: "Clinical record is too large for one summary request. Summarize documents individually first." });
-  }
+  const source = JSON.stringify({ session: rows[0], documents: docs.rows });
+  if (source.length > 60000) return res.status(413).json({ error: "Clinical record is too large for one summary request. Summarize documents individually first." });
 
   try {
     const result = await ai.generateText({
@@ -56,13 +50,16 @@ export default async function (req, res) {
       maxTokens: 5000
     });
 
-    if (result.finishReason === "length") {
-      return res.status(502).json({ error: "Summary was truncated and was not accepted." });
-    }
+    if (result.finishReason === "length") return res.status(502).json({ error: "Summary was truncated and was not accepted." });
 
     let summary;
     try { summary = JSON.parse(result.text); }
     catch { return res.status(502).json({ error: "Summary model returned invalid JSON." }); }
+
+    await db.query(
+      "UPDATE clinical_sessions SET intake_json = intake_json || $1::jsonb, status='in_review', updated_at=now() WHERE id=$2",
+      [JSON.stringify({ lastSummary: summary, summaryUpdatedAt: new Date().toISOString() }), sessionId]
+    );
 
     await db.query(
       "INSERT INTO clinical_events (session_id, event_type, source, payload) VALUES ($1,$2,$3,$4)",
