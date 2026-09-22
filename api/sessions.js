@@ -9,6 +9,7 @@ export default async function (req, res) {
   const age = Number.isFinite(Number(body.patientAge)) ? Number(body.patientAge) : null;
   const language = String(body.language || "English").slice(0, 50);
   const complaint = String(body.chiefComplaint || "").trim().slice(0, 5000);
+  const story = String(body.story || "").trim().slice(0, 10000);
 
   if (!name && !complaint) {
     return res.status(400).json({ error: "patientName or chiefComplaint is required" });
@@ -18,7 +19,8 @@ export default async function (req, res) {
     patientName: name || "Not recorded",
     patientAge: age,
     language,
-    chiefComplaint: complaint || "Not recorded"
+    chiefComplaint: complaint || "Not recorded",
+    patientStory: story || "Not recorded"
   };
 
   const { rows } = await db.query(

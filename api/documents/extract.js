@@ -27,8 +27,13 @@ export default async function (req, res) {
   if (result.finishReason === "length") return res.status(502).json({ error: "Extraction was truncated." });
 
   let data;
-  try { data = JSON.parse(result.text); }
-  catch { return res.status(502).json({ error: "Extraction model returned invalid JSON." }); }
+  try {
+    const raw = String(result.text || "").trim();
+    const unfenced = raw.replace(/^\`\`\`(?:json)?\s*/i, "").replace(/\s*\`\`\`$/i, "").trim();
+    data = JSON.parse(unfenced);
+  } catch {
+    return res.status(502).json({ error: "Extraction model returned invalid JSON." });
+  }
 
   await db.query(
     "UPDATE clinical_documents SET extraction_json=$1, verification_status='pending' WHERE id=$2",
