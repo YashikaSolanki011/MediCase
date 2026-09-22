@@ -73,6 +73,11 @@ Return plain text only. Mark an unreadable region as [UNCLEAR] rather than inven
       [sessionId, "document_ocr_completed", "ocr", JSON.stringify({ documentId: rows[0].id, filename: file.filename })]
     );
 
+    await db.query(
+      "UPDATE clinical_sessions SET status='in_progress', updated_at=now() WHERE id=$1",
+      [sessionId]
+    );
+
     res.json({
       documentId: rows[0].id,
       filename: file.filename,

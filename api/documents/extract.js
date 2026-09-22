@@ -45,5 +45,10 @@ export default async function (req, res) {
     [rows[0].session_id, "document_extraction_completed", "ai", JSON.stringify({ documentId, data })]
   );
 
+  await db.query(
+    "UPDATE clinical_sessions SET status='in_review', updated_at=now() WHERE id=$1",
+    [rows[0].session_id]
+  );
+
   res.json({ documentId, data, verificationRequired: true });
 }
