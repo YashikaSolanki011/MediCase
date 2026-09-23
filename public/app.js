@@ -1,3 +1,4 @@
+async function getAuthClient(){if(window.__medikioskSupabase)return window.__medikioskSupabase;if(!window.supabase){await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});}if(!window.MEDIKIOSK_CONFIG){await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/config.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});}window.__medikioskSupabase=window.supabase.createClient(window.MEDIKIOSK_CONFIG.supabaseUrl,window.MEDIKIOSK_CONFIG.supabaseAnonKey);return window.__medikioskSupabase;}
 let currentSessionId = null;
 let currentSession = null;
 const $ = id => document.getElementById(id);
@@ -15,7 +16,9 @@ document.querySelectorAll('.nav').forEach(n => n.onclick = () => show(n.dataset.
 $('newPatient').onclick = startNewPatient;
 
 async function api(path, options = {}) {
-  const r = await fetch(path, options);
+  const S=await getAuthClient(); const {data}=await S.auth.getSession();
+  const headers=new Headers(options.headers||{}); if(data.session) headers.set('Authorization','Bearer '+data.session.access_token);
+  const r = await fetch(path, {...options,headers});
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(d.error || `Request failed (${r.status})`);
   return d;
@@ -161,16 +164,12 @@ function formatDate(x){if(!x)return '—';const d=new Date(x);return isNaN(d)?St
 function esc(x){return String(x??'').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#39;'}[m]||m))}
 
 async function initApp(){
-  if (window.hatchable?.auth) {
-    const authSession = await window.hatchable.auth.getSession();
-    if (!authSession?.user) {
-      window.location.href = '/login?next=' + encodeURIComponent(window.location.pathname);
-      return;
-    }
-    const user = authSession.user;
-    const badge = document.querySelector('.status');
-    if (badge) badge.textContent = '● Signed in · ' + (user.email || user.name || 'patient');
-  }
+  const S=await getAuthClient();
+  const {data:authSession}=await S.auth.getSession();
+  if (!authSession?.session?.user) { window.location.href='/login?next='+encodeURIComponent(window.location.pathname); return; }
+  const user=authSession.session.user;
+  const badge=document.querySelector('.status');
+  if (badge) badge.textContent='● Signed in · '+(user.email || 'patient');
   await loadRecentSessions();
   const last=localStorage.getItem(LAST_SESSION_KEY);
   if(last) await loadSession(last,{announce:false});
