@@ -86,6 +86,7 @@ function startNewPatient() {
   $('summaryBox').innerHTML = '<div class="empty">No summary generated. Create an intake session first.</div>';
   $('json').textContent = '{ "status": "waiting", "resource": "Bundle" }';
   $('sessionBadge').textContent = 'No active patient';
+  renderCurrentPatientCard();
   show('intake');
 }
 
@@ -98,22 +99,17 @@ async function createSession() {
     await loadSession(currentSessionId, {announce:false});
     $('intakeResult').innerHTML = '<div class="notice">Session saved permanently. Adaptive questions are now available.</div>';
     adaptiveState.questions=buildAdaptiveQuestions(); adaptiveState.index=0; adaptiveState.answers={}; renderAdaptiveQuestion();
-    await loadRecentSessions();
+    renderCurrentPatientCard();
     show('documents');
   } catch (e) { $('intakeResult').innerHTML = '<div class="notice">'+esc(e.message)+'</div>'; }
 }
 
-async function loadRecentSessions() {
-  try {
-    const d = await api('/api/sessions?limit=8');
-    const box = $('recentSessions');
-    if (!box) return;
-    if (!d.sessions?.length) { box.innerHTML = '<div class="empty">No saved patient sessions yet.</div>'; return; }
-    box.innerHTML = d.sessions.map(s => '<button class="history-item '+(s.id===currentSessionId?'selected':'')+'" onclick="loadSession(\''+s.id+'\')"><span><b>'+esc(s.patientName || 'Unnamed patient')+'</b><small>'+esc(s.chiefComplaint || 'No complaint')+' · '+esc(s.language || 'English')+'</small></span><em>'+formatDate(s.updatedAt)+'</em></button>').join('');
-  } catch (e) {
-    if ($('recentSessions')) $('recentSessions').innerHTML = '<div class="notice">History could not be loaded.</div>';
-  }
+function renderCurrentPatientCard(){
+  const box=$('currentPatientCard'); if(!box)return;
+  if(!currentSession){box.innerHTML='<div class="empty">No active patient record.</div>';return;}
+  box.innerHTML='<div class="current-patient"><b>'+esc(currentSession.patientName||'Unnamed patient')+'</b><small>'+esc(currentSession.chiefComplaint||'No chief complaint recorded')+' · '+esc(currentSession.language||'English')+'</small><small>Record updated '+formatDate(currentSession.updatedAt)+'</small></div>';
 }
+async function loadRecentSessions(){ return; }
 
 async function loadSession(id, opts = {}) {
   try {
@@ -122,7 +118,7 @@ async function loadSession(id, opts = {}) {
     currentSession = d.session;
     localStorage.setItem(LAST_SESSION_KEY, currentSessionId);
     hydrateSession(d);
-    await loadRecentSessions();
+    renderCurrentPatientCard();
     if (opts.announce !== false) show('dashboard');
   } catch (e) {
     localStorage.removeItem(LAST_SESSION_KEY);
@@ -138,6 +134,7 @@ function hydrateSession(d) {
   setFormValue('complaint', s.chiefComplaint);
   setFormValue('story', s.patientStory);
   $('sessionBadge').textContent = `Saved session · ${s.documents.length} document${s.documents.length===1?'':'s'}`;
+  renderCurrentPatientCard();
   renderDocuments(d);
   renderTimeline(d.events || []);
   if (!adaptiveState.questions.length || adaptiveState.index >= adaptiveState.questions.length) { adaptiveState.questions=buildAdaptiveQuestions(); adaptiveState.index=0; }
@@ -162,14 +159,27 @@ function renderDocuments(d) {
 function renderTimeline(events) {
   const box = $('timelineList'); if (!box) return;
   if (!events.length) { box.innerHTML = '<div class="empty">No events yet.</div>'; return; }
-  box.innerHTML = events.map(e => '<div class="tl"><span></span><div><b>'+esc(humanEvent(e.eventType))+'</b><small>'+esc(e.source)+' · '+formatDate(e.createdAt)+'</small></div></div>').join('');
+  box.innerHTML = events.map(e => '<div class="tl"><span></span><div><b>'+esc(humanEvent(e.eventType))+'</b><small>'+esc(e.source)+' · '+formatDate(e.createdAt)+'</small>'+eventDetail(e)+'</div></div>').join('');
 }
 function humanEvent(x) { return String(x||'event').replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase()); }
+function eventDetail(e){const p=e.payload||{};if(e.eventType==='adaptive_question_answered')return '<div class="event-detail"><b>'+esc(p.question||'Question')+':</b> '+esc(p.answer||'Not answered')+'</div>';if(e.eventType==='session_created')return '<div class="event-detail">'+esc(p.chiefComplaint||'')+'</div>';return '';}
 
-function renderMedications(docs) {
-  const rows=[];
-  docs.forEach(doc => (doc.extraction?.medications || []).forEach(m => rows.push('<tr><td>'+esc(m.name||'—')+'</td><td>'+esc(m.strength||'—')+'</td><td>'+esc(m.frequency||'—')+'</td><td>'+esc(doc.filename)+'</td><td><span class="pill">'+esc(doc.verificationStatus||'pending')+'</span></td></tr>')));
-  $('medicationRows').innerHTML = rows.length ? rows.join('') : '<tr><td colspan="5" class="empty">No medications extracted yet.</td></tr>';
+function medicationKey(m){return String(m?.name||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,' ')}
+function renderMedications(docs){
+  const meds=[];
+  docs.forEach(doc => (doc.extraction?.medications || []).forEach(m => meds.push({...m,source:doc.filename,status:doc.verificationStatus||'pending'})));
+  const byName={}; meds.forEach(m=>{const k=medicationKey(m);if(k)(byName[k] ||= []).push(m);});
+  let duplicates=0,conflicts=0; Object.values(byName).forEach(list=>{if(list.length>1){duplicates+=list.length-1;const variants=new Set(list.map(x=>[x.strength||'',x.frequency||'',x.dose||''].join('|')));if(variants.size>1)conflicts++;}});
+  const unverified=meds.filter(m=>m.status!=='verified').length;
+  if($('medDuplicateCount'))$('medDuplicateCount').textContent=String(duplicates);
+  if($('medConflictCount'))$('medConflictCount').textContent=String(conflicts);
+  if($('medUnverifiedCount'))$('medUnverifiedCount').textContent=String(unverified);
+  if($('medicationNotice'))$('medicationNotice').innerHTML=meds.length?'<div class="notice">Medication facts were extracted from source documents. Clinician verification is required before they become trusted clinical data.</div>':'<div class="notice">No medication facts yet. Upload a prescription/report and run <b>OCR & extract</b> first.</div>';
+  $('medicationRows').innerHTML=meds.length?meds.map(m=>'<tr><td><b>'+esc(m.name||'—')+'</b></td><td>'+esc(m.strength||'—')+'</td><td>'+esc([m.dose,m.route].filter(Boolean).join(' · ')||'—')+'</td><td>'+esc(m.frequency||'—')+'</td><td>'+esc(m.duration||'—')+'</td><td>'+esc(m.source)+'</td><td><span class="pill">'+esc(m.status)+'</span></td></tr>').join(''):'<tr><td colspan="7" class="empty">No medications extracted yet.</td></tr>';
+}
+async function refreshMedicationReview(){
+  if(!currentSessionId){$('medicationNotice').innerHTML='<div class="notice">Create or restore a patient record first.</div>';return;}
+  try{const d=await api('/api/sessions/'+encodeURIComponent(currentSessionId));renderMedications(d.session.documents||[]);$('medicationNotice').innerHTML='<div class="notice">Medication review refreshed from the latest saved extraction.</div>';}catch(e){$('medicationNotice').innerHTML='<div class="notice">'+esc(e.message)+'</div>';}
 }
 
 function renderSafety(docs) {
@@ -217,20 +227,17 @@ function renderFHIR(s){$('json').textContent=JSON.stringify({resourceType:'Bundl
 function formatDate(x){if(!x)return '—';const d=new Date(x);return isNaN(d)?String(x):d.toLocaleDateString(undefined,{day:'2-digit',month:'short',year:'numeric'});}
 function esc(x){return String(x??'').replace(/[&<>\"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\\':'&#39;'}[m]||m))}
 
+async function configureAdminLink(){const link=document.querySelector('a[href="/admin"]');if(!link)return;try{const S=await getAuthClient();const {data}=await S.auth.getSession();if(!data.session){link.style.display='none';return;}const r=await fetch('/api/admin/dashboard',{headers:{Authorization:'Bearer '+data.session.access_token}});if(!r.ok)link.style.display='none';}catch{link.style.display='none';}}
 async function initApp(){
   const S=await getAuthClient();
   const {data:authSession}=await S.auth.getSession();
   if (!authSession?.session?.user) { window.location.href='/login?next='+encodeURIComponent(window.location.pathname); return; }
   const user=authSession.session.user;
+  await configureAdminLink();
   const badge=document.querySelector('.status');
   if (badge) badge.textContent='● Signed in · '+(user.email || 'patient');
-  await loadRecentSessions();
   const last=localStorage.getItem(LAST_SESSION_KEY);
   if(last) await loadSession(last,{announce:false});
-  if(!currentSessionId){
-    const d=await api('/api/sessions?limit=1').catch(()=>({sessions:[]}));
-    if(d.sessions?.[0]) await loadSession(d.sessions[0].id,{announce:false});
-  }
-  if(currentSessionId) $('resumeNotice').innerHTML='<div class="notice">Last patient record restored from the server. Nothing was lost when you left the website.</div>';
+  if(currentSessionId) $('resumeNotice').innerHTML='<div class="notice">Your current patient record is restored privately from the server.</div>';
 }
 window.addEventListener('DOMContentLoaded', initApp);
