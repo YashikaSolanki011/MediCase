@@ -1,6 +1,57 @@
 async function getAuthClient(){if(window.__medikioskSupabase)return window.__medikioskSupabase;if(!window.supabase){await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});}if(!window.MEDIKIOSK_CONFIG){await new Promise((resolve,reject)=>{const s=document.createElement('script');s.src='/config.js';s.onload=resolve;s.onerror=reject;document.head.appendChild(s);});}window.__medikioskSupabase=window.supabase.createClient(window.MEDIKIOSK_CONFIG.supabaseUrl,window.MEDIKIOSK_CONFIG.supabaseAnonKey);return window.__medikioskSupabase;}
 let currentSessionId = null;
 let currentSession = null;
+
+const adaptiveState = { questions: [], index: 0, answers: {} };
+
+function buildAdaptiveQuestions() {
+  const complaint = String($('complaint')?.value || currentSession?.chiefComplaint || '').toLowerCase();
+  const questions = [
+    {id:'onset',label:'When did the problem begin?',type:'text',placeholder:'e.g. 3 days ago'},
+    {id:'severity',label:'How severe is it right now?',type:'select',options:['Mild','Moderate','Severe']},
+    {id:'associated',label:'Are there any other symptoms or changes you noticed?',type:'text',placeholder:'Describe any associated symptoms'}
+  ];
+  if (/(pain|ache|headache|stomach|abdomen|chest|back|joint|throat)/.test(complaint)) {
+    questions.splice(1,0,{id:'location',label:'Where exactly is the problem located?',type:'text',placeholder:'e.g. left side of abdomen'});
+  }
+  if (/(fever|cough|cold|infection|vomit|diarr|breath|respirat)/.test(complaint)) {
+    questions.splice(1,0,{id:'frequency',label:'How often is it happening?',type:'text',placeholder:'e.g. 3 times today'});
+  }
+  return questions;
+}
+
+function renderAdaptiveQuestion() {
+  const box=$('adaptiveQuestion'), next=$('adaptiveNext'), skip=$('adaptiveSkip'), progress=$('adaptiveProgress');
+  if(!box) return;
+  if(!currentSessionId){ box.innerHTML='<div class="empty">Create an intake session to begin adaptive questioning.</div>'; next.disabled=true; skip.disabled=true; if(progress)progress.textContent=''; return; }
+  if(!adaptiveState.questions.length) adaptiveState.questions=buildAdaptiveQuestions();
+  const q=adaptiveState.questions[adaptiveState.index];
+  if(!q){ box.innerHTML='<div class="notice">Adaptive intake complete. Your answers are saved in the clinical timeline.</div>'; next.disabled=true; skip.disabled=true; if(progress)progress.textContent='Complete'; return; }
+  const value=adaptiveState.answers[q.id]||'';
+  const control=q.type==='select'
+    ? '<select id="adaptiveAnswer"><option value="">Select an answer</option>'+q.options.map(o=>'<option '+(o===value?'selected':'')+'>'+esc(o)+'</option>').join('')+'</select>'
+    : '<input id="adaptiveAnswer" value="'+esc(value)+'" placeholder="'+esc(q.placeholder||'')+'">';
+  box.innerHTML='<div class="adaptive-label"><span>Question '+(adaptiveState.index+1)+' of '+adaptiveState.questions.length+'</span><b>'+esc(q.label)+'</b>'+control+'</div>';
+  next.disabled=false; skip.disabled=false;
+  if(progress)progress.textContent=(adaptiveState.index)+' answered · '+(adaptiveState.questions.length-adaptiveState.index)+' remaining';
+}
+
+async function saveAdaptiveAnswer(skip=false) {
+  if(!currentSessionId) return;
+  const q=adaptiveState.questions[adaptiveState.index];
+  if(!q) return;
+  const value=skip?'Not answered':String($('adaptiveAnswer')?.value||'').trim();
+  adaptiveState.answers[q.id]=value;
+  try {
+    await api('/api/sessions/'+encodeURIComponent(currentSessionId),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({adaptiveAnswer:{questionId:q.id,question:q.label,answer:value}})});
+    adaptiveState.index++;
+    renderAdaptiveQuestion();
+    await loadSession(currentSessionId,{announce:false});
+  } catch(e) {
+    $('intakeResult').innerHTML='<div class="notice">'+esc(e.message)+'</div>';
+  }
+}
+function skipAdaptiveQuestion(){ saveAdaptiveAnswer(true); }
 const $ = id => document.getElementById(id);
 const LAST_SESSION_KEY = 'medikiosk:lastSessionId';
 
@@ -45,7 +96,8 @@ async function createSession() {
     currentSessionId = d.sessionId;
     localStorage.setItem(LAST_SESSION_KEY, currentSessionId);
     await loadSession(currentSessionId, {announce:false});
-    $('intakeResult').innerHTML = '<div class="notice">Session saved permanently. You can leave and return later without losing this patient record.</div>';
+    $('intakeResult').innerHTML = '<div class="notice">Session saved permanently. Adaptive questions are now available.</div>';
+    adaptiveState.questions=buildAdaptiveQuestions(); adaptiveState.index=0; adaptiveState.answers={}; renderAdaptiveQuestion();
     await loadRecentSessions();
     show('documents');
   } catch (e) { $('intakeResult').innerHTML = '<div class="notice">'+esc(e.message)+'</div>'; }
@@ -88,6 +140,8 @@ function hydrateSession(d) {
   $('sessionBadge').textContent = `Saved session · ${s.documents.length} document${s.documents.length===1?'':'s'}`;
   renderDocuments(d);
   renderTimeline(d.events || []);
+  if (!adaptiveState.questions.length || adaptiveState.index >= adaptiveState.questions.length) { adaptiveState.questions=buildAdaptiveQuestions(); adaptiveState.index=0; }
+  renderAdaptiveQuestion();
   renderMedications(d.documents || []);
   renderSafety(d.documents || []);
   if (s.lastSummary) {
