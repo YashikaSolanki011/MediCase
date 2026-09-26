@@ -1,0 +1,10 @@
+{
+  "name":"medikiosk",
+  "private":true,
+  "version":"1.0.0",
+  "engines":{"node":">=22"},
+  "dependencies":{
+    "@supabase/supabase-js":"^2.57.0",
+    "formidable":"^3.5.4"
+  }
+}

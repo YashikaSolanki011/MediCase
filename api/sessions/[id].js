@@ -1,58 +1,33 @@
-import { db } from "hatchable";
+import { supabase, requireUser, sendError } from "../../lib/server.js";
 
-export const access = "user";
-export const methods = ["GET"];
-
-export default async function (req, res) {
-  const id = String(req.params?.id || "");
-  if (!id) return res.status(400).json({ error: "session id is required." });
-
-  const sessions = await db.query(
-    "SELECT id, owner_user_id, patient_name, patient_age, language, chief_complaint, intake_json, status, created_at, updated_at FROM clinical_sessions WHERE id=$1 AND owner_user_id=$2",
-    [id, req.user.id]
-  );
-  if (!sessions.rows.length) return res.status(404).json({ error: "Session not found." });
-
-  const docs = await db.query(
-    "SELECT id, filename, content_type, ocr_text, extraction_json, verification_status, created_at FROM clinical_documents WHERE session_id=$1 ORDER BY created_at ASC",
-    [id]
-  );
-  const events = await db.query(
-    "SELECT id, event_type, source, payload, created_at FROM clinical_events WHERE session_id=$1 ORDER BY created_at ASC",
-    [id]
-  );
-
-  const s = sessions.rows[0];
-  const intake = s.intake_json || {};
-  return res.json({
-    session: {
-      id: s.id,
-      patientName: s.patient_name,
-      patientAge: s.patient_age,
-      language: s.language,
-      chiefComplaint: s.chief_complaint,
-      patientStory: intake.patientStory || "",
-      status: s.status,
-      createdAt: s.created_at,
-      updatedAt: s.updated_at,
-      lastSummary: intake.lastSummary || null,
-      summaryUpdatedAt: intake.summaryUpdatedAt || null,
-      documents: docs.rows.map(d => ({
-        id: d.id,
-        filename: d.filename,
-        contentType: d.content_type,
-        ocrText: d.ocr_text,
-        extraction: d.extraction_json || {},
-        verificationStatus: d.verification_status,
-        createdAt: d.created_at
-      }))
-    },
-    events: events.rows.map(e => ({
-      id: e.id,
-      eventType: e.event_type,
-      source: e.source,
-      payload: e.payload,
-      createdAt: e.created_at
-    }))
-  });
+export default async function(req,res){
+  try{
+    const user=await requireUser(req);
+    const id=String(req.query?.id||req.params?.id||"");
+    if(req.method==="PATCH"){
+      const answer=req.body?.adaptiveAnswer;
+      if(!answer?.questionId) return res.status(400).json({error:"adaptiveAnswer.questionId is required."});
+      const {data:s,error:se}=await supabase.from("clinical_sessions").select("id,intake_json").eq("id",id).eq("owner_user_id",user.id).single();
+      if(se||!s)return res.status(404).json({error:"Session not found."});
+      const intake={...(s.intake_json||{})};
+      const answers=Array.isArray(intake.adaptiveAnswers)?intake.adaptiveAnswers.slice():[];
+      answers.push({questionId:String(answer.questionId),question:String(answer.question||""),answer:String(answer.answer??""),answeredAt:new Date().toISOString()});
+      intake.adaptiveAnswers=answers;
+      const {error:ue}=await supabase.from("clinical_sessions").update({intake_json:intake,updated_at:new Date().toISOString(),status:"in_progress"}).eq("id",id).eq("owner_user_id",user.id);
+      if(ue)throw ue;
+      const {error:ee}=await supabase.from("clinical_events").insert({session_id:id,event_type:"adaptive_question_answered",source:"patient",payload:{questionId:answer.questionId,question:answer.question,answer:answer.answer}});
+      if(ee)throw ee;
+      return res.json({ok:true,answer});
+    }
+    if(!id)return res.status(400).json({error:"session id is required."});
+    const {data:s,error}=await supabase.from("clinical_sessions").select("id,owner_user_id,patient_name,patient_age,language,chief_complaint,intake_json,status,created_at,updated_at").eq("id",id).eq("owner_user_id",user.id).single();
+    if(error||!s)return res.status(404).json({error:"Session not found."});
+    const [{data:docs,error:de},{data:events,error:ee}]=await Promise.all([
+      supabase.from("clinical_documents").select("id,filename,content_type,ocr_text,extraction_json,verification_status,created_at").eq("session_id",id).order("created_at",{ascending:true}),
+      supabase.from("clinical_events").select("id,event_type,source,payload,created_at").eq("session_id",id).order("created_at",{ascending:true})
+    ]);
+    if(de)throw de;if(ee)throw ee;
+    const intake=s.intake_json||{};
+    res.json({session:{id:s.id,patientName:s.patient_name,patientAge:s.patient_age,language:s.language,chiefComplaint:s.chief_complaint,patientStory:intake.patientStory||"",status:s.status,createdAt:s.created_at,updatedAt:s.updated_at,lastSummary:intake.lastSummary||null,summaryUpdatedAt:intake.summaryUpdatedAt||null,documents:(docs||[]).map(d=>({id:d.id,filename:d.filename,contentType:d.content_type,ocrText:d.ocr_text,extraction:d.extraction_json||{},verificationStatus:d.verification_status,createdAt:d.created_at}))},events:(events||[]).map(e=>({id:e.id,eventType:e.event_type,source:e.source,payload:e.payload,createdAt:e.created_at}))});
+  }catch(e){sendError(res,e);}
 }
