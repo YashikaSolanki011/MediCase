@@ -4,6 +4,21 @@ export default async function(req,res){
   try{
     const user=await requireUser(req);
     const id=String(req.query?.id||req.params?.id||"");
+    if(req.method==="PATCH"){
+      const answer=req.body?.adaptiveAnswer;
+      if(!answer?.questionId) return res.status(400).json({error:"adaptiveAnswer.questionId is required."});
+      const {data:s,error:se}=await supabase.from("clinical_sessions").select("id,intake_json").eq("id",id).eq("owner_user_id",user.id).single();
+      if(se||!s)return res.status(404).json({error:"Session not found."});
+      const intake={...(s.intake_json||{})};
+      const answers=Array.isArray(intake.adaptiveAnswers)?intake.adaptiveAnswers.slice():[];
+      answers.push({questionId:String(answer.questionId),question:String(answer.question||""),answer:String(answer.answer??""),answeredAt:new Date().toISOString()});
+      intake.adaptiveAnswers=answers;
+      const {error:ue}=await supabase.from("clinical_sessions").update({intake_json:intake,updated_at:new Date().toISOString(),status:"in_progress"}).eq("id",id).eq("owner_user_id",user.id);
+      if(ue)throw ue;
+      const {error:ee}=await supabase.from("clinical_events").insert({session_id:id,event_type:"adaptive_question_answered",source:"patient",payload:{questionId:answer.questionId,question:answer.question,answer:answer.answer}});
+      if(ee)throw ee;
+      return res.json({ok:true,answer});
+    }
     if(!id)return res.status(400).json({error:"session id is required."});
     const {data:s,error}=await supabase.from("clinical_sessions").select("id,owner_user_id,patient_name,patient_age,language,chief_complaint,intake_json,status,created_at,updated_at").eq("id",id).eq("owner_user_id",user.id).single();
     if(error||!s)return res.status(404).json({error:"Session not found."});
